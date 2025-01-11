@@ -50,7 +50,7 @@ int main(void) {
   char input[5];
 
   // Get initial terminal size.
-  ioctl(STDIN_FILENO, TIOCGSIZE, &win);
+  updatewinsize();
 
   // Initialize the food struct.
   struct food food[10];
@@ -75,9 +75,7 @@ int main(void) {
 
   while (1) {
     winclear();
-
-    // Get terminal window size.
-    ioctl(STDIN_FILENO, TIOCGSIZE, &win);
+    updatewinsize();
 
     // Get input.
     memset(&input, '\0', sizeof(input));      // 'clear' the input buffer.
@@ -131,6 +129,11 @@ void movecursor(int x, int y) {
 inline void nsleep(int nsec) {
   struct timespec tm = {0, nsec};
   nanosleep(&tm, NULL);
+  return;
+}
+
+inline void updatewinsize(void) {
+  ioctl(STDIN_FILENO, TIOCGWINSZ, &win);
   return;
 }
 
