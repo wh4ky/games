@@ -1,3 +1,4 @@
+// clang snake.c -std=gnu99 -O3 -g -Wextra -Wall
 
 #include <fcntl.h>
 #include <stdbool.h>
@@ -24,10 +25,10 @@ struct food {
 
 enum direction { UP = 0, DOWN = 1, RIGHT = 2, LEFT = 3 };
 
-inline void winclear(void);
+void winclear(void);
 void movecursor(int x, int y);
-inline void nsleep(int nsec);
-inline void updatewinsize(void);
+void nsleep(int nsec);
+void updatewinsize(void);
 
 int check_collisions(struct snake *s, struct food *f, int size);
 
@@ -114,7 +115,7 @@ int main(void) {
 
 //////////////// FUNCTION DEFINITIONS ////////////////
 
-inline void winclear(void) {
+void winclear(void) {
   write(STDOUT_FILENO, "\x1b[2J", 4);
   return;
 }
@@ -126,13 +127,13 @@ void movecursor(int x, int y) {
   return;
 }
 
-inline void nsleep(int nsec) {
+void nsleep(int nsec) {
   struct timespec tm = {0, nsec};
   nanosleep(&tm, NULL);
   return;
 }
 
-inline void updatewinsize(void) {
+void updatewinsize(void) {
   ioctl(STDIN_FILENO, TIOCGWINSZ, &win);
   return;
 }
