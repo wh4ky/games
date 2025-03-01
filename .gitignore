@@ -1,2 +1,4 @@
 *dSYM
 a.out
+.cache
+build
