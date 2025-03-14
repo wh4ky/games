@@ -9,6 +9,9 @@
 #include <time.h>
 #include <unistd.h>
 
+// Definitions (yes these #define's are needed)
+#define FPS 15
+
 // Sprite strings.
 struct Sprite {
   const char *bg_color;
@@ -17,6 +20,8 @@ struct Sprite {
 };
 
 // My snake is indeed a linked list.
+// TODO:
+// Make this a hashmap.
 struct Snake {
   int pos_x;
   int pos_y;
@@ -33,11 +38,10 @@ struct Food {
 enum direction { UP = 0, DOWN = 1, RIGHT = 2, LEFT = 3 };
 
 // Helper functions
-void winclear(void);
-void movecursor(int x, int y);
-void nsleep(int nsec);
-void updatewinsize(void);
-void setcolor(const struct Sprite sprite);
+static inline void winclear(void);
+static inline void movecursor(int x, int y);
+static inline void updatewinsize(void);
+static inline void setcolor(const struct Sprite sprite);
 
 // Big boy function.
 int check_collisions(struct Snake *s, struct Food *f, int size);
@@ -58,18 +62,18 @@ int snake_dir = RIGHT;
 
 // Sprite definitions.
 const struct Sprite snake_sprite = {
-    .bg_color = "\x1b[48;5;7m",
-    .fg_color = "\x1b[38;5;15m",
+    .bg_color = "\x1b[48;5;10m",
+    .fg_color = "\x1b[38;5;2m",
     .character = '~',
 };
 
 const struct Sprite snake_head_sprite = {
-    .bg_color = "\x1b[48;5;8m", .fg_color = "\x1b[38;5;9m", .character = '0'};
+    .bg_color = "\x1b[48;5;2m", .fg_color = "\x1b[38;5;9m", .character = '*'};
 
 const struct Sprite food_sprite = {
-    .bg_color = "\x1b[48;5;2m",
-    .fg_color = "\x1b[38;5;10m",
-    .character = '@',
+    .bg_color = "\x1b[48;5;9m",
+    .fg_color = "\x1b[38;5;94m",
+    .character = '\'',
 };
 
 // String to reset terminal colors.
@@ -80,18 +84,21 @@ const char *reset_color = "\x1b[0m";
  */
 int main(void) {
   srand((unsigned int)time(NULL)); // Seed the random number generator.
-  char input[5];                   // Input buffer.
+  char out_buffer[BUFSIZ];         // Stack-based buffer
+  setvbuf(stdout, out_buffer, _IOFBF,
+          BUFSIZ); // Set full buffering and ensure stack-based buffer.
+  char input[5];   // Input buffer.
 
   // Init timespecs.
   struct timespec start, end, sleep;
-  int sleepfor = 2 * 33333333;
+  int sleepfor = (int)1e9 / FPS;
 
   // Get initial terminal size.
   updatewinsize();
 
   // Initialize the food struct.
-  struct Food food[10];
-  int food_size = sizeof(food) / sizeof(struct Food);
+  struct Food food[(win.ws_row * win.ws_col) / 1000];
+  int food_size = (int)sizeof(food) / (int)sizeof(struct Food);
   f_init(food, food_size);
 
   // Initialize the player struct.
@@ -126,37 +133,63 @@ int main(void) {
     memset(&input, '\0', sizeof(input));          // 'clear' the input buffer.
     read(STDIN_FILENO, input, sizeof(input) - 1); // Get input (POSIX).
 
-    if (strcmp(input, "\x1b[A") == 0 || strcmp(input, "w") == 0 ||
-        strcmp(input, "k") == 0) {
-      snake_dir = UP;
-    } else if (strcmp(input, "\x1b[B") == 0 || strcmp(input, "s") == 0 ||
-               strcmp(input, "j") == 0) {
-      snake_dir = DOWN;
-    } else if (strcmp(input, "\x1b[C") == 0 || strcmp(input, "d") == 0 ||
-               strcmp(input, "l") == 0) {
-      snake_dir = RIGHT;
-    } else if (strcmp(input, "\x1b[D") == 0 || strcmp(input, "a") == 0 ||
-               strcmp(input, "h") == 0) {
-      snake_dir = LEFT;
-    }
+    if (input[0] == '\x1b') {
+      switch (input[2]) {
+      case 'A':
+        snake_dir = UP;
+        break;
+      case 'B':
+        snake_dir = DOWN;
+        break;
+      case 'C':
+        snake_dir = RIGHT;
+        break;
+      case 'D':
+        snake_dir = LEFT;
+        break;
+      }
+      if (strcmp(input, "\x1b") == 0)
+        goto exit;
 
-    if (strcmp(input, "\x1b") == 0) {
-      break;
+    } else {
+      switch (input[0]) {
+      case 'w':
+      case 'k':
+        snake_dir = UP;
+        break;
+      case 's':
+      case 'j':
+        snake_dir = DOWN;
+        break;
+      case 'd':
+      case 'l':
+        snake_dir = RIGHT;
+        break;
+      case 'a':
+      case 'h':
+        snake_dir = LEFT;
+        break;
+      case 'q':
+        goto exit;
+        break;
+      }
     }
 
     s_move(player);
 
-    if (check_collisions(player, food, food_size) == 1) {
-      break;
-    }
+    if (check_collisions(player, food, food_size) == 1)
+      goto exit;
 
     f_print(food, food_size);
     s_print(player);
 
+    movecursor(win.ws_col, win.ws_row);
+    fflush(stdout);
+
     clock_gettime(CLOCK_MONOTONIC, &end);
-    int elapsed_time = (int)((end.tv_sec - start.tv_sec) * (long)1e9 +
-                             (end.tv_nsec - start.tv_nsec));
-    int remaining_time = sleepfor - elapsed_time;
+    int remaining_time =
+        sleepfor - (int)((end.tv_sec - start.tv_sec) * (long)1e9 +
+                         (end.tv_nsec - start.tv_nsec));
     if (remaining_time > 0) {
       sleep.tv_sec = remaining_time / (long)1e9;  // Convert to seconds
       sleep.tv_nsec = remaining_time % (long)1e9; // Remaining nanoseconds
@@ -164,6 +197,7 @@ int main(void) {
     }
   }
 
+exit:
   s_delete(player);
   tcsetattr(STDIN_FILENO, TCSANOW, &default_t);
   return EXIT_SUCCESS;
@@ -178,34 +212,23 @@ int main(void) {
 /*
  * Clears the whole terminal window.
  */
-void winclear(void) {
-  write(STDOUT_FILENO, "\x1b[2J", 4);
+static inline void winclear(void) {
+  fprintf(stdout, "\x1b[2J");
   return;
 }
 
 /*
  * Moves the cursor to the 'x', 'y' coordinates.
  */
-void movecursor(int x, int y) {
-  char buf[12];
-  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", y, x);
-  write(STDOUT_FILENO, buf, strlen(buf));
-  return;
-}
-
-/*
- * Sleep for 'nsec' nanoseconds.
- */
-void nsleep(int nsec) {
-  struct timespec tm = {0, nsec};
-  nanosleep(&tm, NULL);
+static inline void movecursor(int x, int y) {
+  fprintf(stdout, "\x1b[%d;%dH", y, x);
   return;
 }
 
 /*
  * Updates the window size.
  */
-void updatewinsize(void) {
+static inline void updatewinsize(void) {
   ioctl(STDIN_FILENO, TIOCGWINSZ, &win);
   return;
 }
@@ -213,18 +236,8 @@ void updatewinsize(void) {
 /*
  * Sets the background and foreground color of the given 'Sprite' struct.
  */
-void setcolor(const struct Sprite sprite) {
-  size_t bufsize = strlen(sprite.fg_color) + strlen(sprite.bg_color) + 1;
-  char *buffer = malloc(bufsize * sizeof(char));
-  if (buffer == NULL) {
-    fprintf(stderr, "Failed to allocate buffer for sprite color!");
-    return;
-  }
-
-  snprintf(buffer, bufsize, "%s%s", sprite.fg_color, sprite.bg_color);
-  write(STDOUT_FILENO, buffer, bufsize);
-
-  free(buffer);
+static inline void setcolor(const struct Sprite sprite) {
+  fprintf(stdout, "%s%s", sprite.fg_color, sprite.bg_color);
   return;
 }
 
@@ -323,22 +336,12 @@ int check_collisions(struct Snake *s, struct Food *f, int size) {
  * 'STDOUT_FILENO'.
  */
 void f_print(struct Food *f, int size) {
-  size_t bufsize = (size_t)(size * (11));
-  // 10 for cursor movement, 1 for the food_sprite.character
-  char *outbuf = malloc(bufsize);
-  int index = 0;
-
   setcolor(food_sprite);
-
   for (int i = 0; i < size; i++) {
-    index +=
-        snprintf(outbuf + index, bufsize - (size_t)index, "\x1b[%d;%dH%c\n",
-                 f[i].pos_y, f[i].pos_x, food_sprite.character);
+    fprintf(stdout, "\x1b[%d;%dH%c", f[i].pos_y, f[i].pos_x,
+            food_sprite.character);
   }
-  write(STDOUT_FILENO, outbuf, strlen(outbuf));
-  write(STDOUT_FILENO, reset_color, strlen(reset_color));
-
-  free(outbuf);
+  fprintf(stdout, "%s", reset_color);
   return;
 }
 
@@ -428,44 +431,23 @@ void s_delete(struct Snake *s) {
 }
 
 /*
- * Outputs the given 'Snake' struct to 'STDOUT_FILENO'.
+ * Outputs the given 'Snake' struct to 'stdout'.
  */
 void s_print(struct Snake *s) {
   struct Snake *curr = s;
 
-  size_t bufsize = 1;
-  int index = 0;
-  char *outbuf = malloc(bufsize);
-  if (outbuf == NULL) {
-    fprintf(stderr, "Failed to alocate memory for snake sprite segments.");
-    return;
-  }
-
   setcolor(snake_head_sprite);
   movecursor(curr->pos_x, curr->pos_y);
-  write(STDOUT_FILENO, &snake_head_sprite.character, 1);
+  fprintf(stdout, "%c", snake_head_sprite.character);
   curr = curr->s;
 
   setcolor(snake_sprite);
   while (curr != NULL) {
-    bufsize += 11; // 10 for cursor movement, 1 for the snake_sprite.character
-
-    char *temp = realloc(outbuf, bufsize);
-    if (temp == NULL) {
-      fprintf(stderr, "Failed to realocate memory for snake sprite segment.");
-      free(outbuf);
-      return;
-    }
-    outbuf = temp;
-
-    index +=
-        snprintf(outbuf + index, bufsize - (size_t)index, "\x1b[%d;%dH%c\n",
-                 curr->pos_y, curr->pos_x, snake_sprite.character);
+    movecursor(curr->pos_x, curr->pos_y);
+    fprintf(stdout, "%c", snake_sprite.character);
     curr = curr->s;
   }
 
-  write(STDOUT_FILENO, outbuf, strlen(outbuf));
-  write(STDOUT_FILENO, reset_color, strlen(reset_color));
-  free(outbuf);
+  fprintf(stdout, "%s", reset_color);
   return;
 }

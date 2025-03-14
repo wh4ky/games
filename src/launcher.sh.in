@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+LC_ALL=C
+LANG=C
+
+program_list=(@PROGRAM_ARRAY_STRING@)
+
+if [ -n "$SSH_CONNECTION" ]; then
+  IFS=' ' read -ra ssh_info_array <<<"$SSH_CONNECTION"
+  name="${ssh_info_array[0]}:${ssh_info_array[1]}"
+else
+  name="$(whoami)"
+fi
+
+function center_text() {
+  local padding=$((($(tput cols) + 2 * $1 - ${#3}) / 2))
+  tput cup $(($(tput lines) / 2 + $2)) $padding
+  printf "$3"
+}
+
+while :; do
+  offset=-4
+  tput clear
+
+  tput setaf 1
+  printf "$(date) - $(hostname) from ${name}"
+
+  tput bold
+  tput setaf 6
+  center_text 0 $offset "Enter program to run or 'q' to quit:"
+
+  tput setaf 4
+  for o in "${program_list[@]}"; do
+    offset=$offset+1
+    center_text 0 $offset $o
+  done
+  offset=$offset+3
+
+  tput setaf 11
+  center_text -15 $offset "> "
+  read -e var
+
+  [ "$var" == "q" ] && break
+
+  for o in "${program_list[@]}"; do
+    [[ "$o" == "$var" ]] && "$(dirname "$0")/bin/$var" && var="" && break
+  done
+
+done
