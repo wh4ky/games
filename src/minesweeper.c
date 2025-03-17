@@ -9,34 +9,42 @@
 #include <time.h>
 #include <unistd.h>
 
-#define FPS 10
+#define FPS 60
 
 static inline void winclear(void);
+void floodFill(int, int);
+
+struct cell {
+  char near;
+  bool bomb;
+  bool flagged;
+  bool revealed;
+};
 
 struct map {
   int rows;
   int cols;
-  bool **map;
+  struct cell **map;
 } map;
 
 struct cursor {
   int x;
   int y;
-  char *color;
 } cursor;
 
 struct winsize win;
+const int offsets[8][2] = {{1, 1},  {1, 0},  {1, -1}, {0, 1},
+                           {0, -1}, {-1, 1}, {-1, 0}, {-1, -1}};
 
 int main(void) {
   srand((unsigned int)time(NULL)); // Seed the random number generator.
   char out_buffer[BUFSIZ];         // Stack-based buffer
   setvbuf(stdout, out_buffer, _IOFBF,
           BUFSIZ); // Set full buffering and ensure stack-based buffer.
-  char input[5];
+  char input[7];
 
-  cursor.color = "\x1b[38;5;7m\x1b[48;5;0m\x1b[0";
-  cursor.x = 0;
-  cursor.y = 0;
+  cursor.x = 1;
+  cursor.y = 1;
 
   // Init timespecs.
   struct timespec start, end, sleep;
@@ -45,16 +53,44 @@ int main(void) {
   // Initialize map struct.
   map.rows = 10;
   map.cols = 20;
-  map.map = calloc((unsigned long)map.rows, sizeof(bool *));
+  map.map = calloc((unsigned long)map.rows, sizeof(struct cell *));
   for (int i = 0; i < map.rows; i++) {
-    map.map[i] = calloc((unsigned long)map.cols, sizeof(bool));
+    map.map[i] = calloc((unsigned long)map.cols, sizeof(struct cell));
+  }
+
+  for (int r = 0; r < map.rows; r++) {
+    for (int c = 0; c < map.cols; c++) {
+      struct cell default_cell = {
+          .near = 0,
+          .bomb = false,
+          .flagged = false,
+          .revealed = false,
+      };
+      map.map[r][c] = default_cell;
+    }
   }
 
   // Initialize all cells in the map.
   for (int i = 0; i < 20; i++) {
     int r = rand() % map.rows;
     int c = rand() % map.cols;
-    map.map[r][c] = !map.map[r][c];
+    map.map[r][c].bomb = true;
+    map.map[r][c].near = 9;
+  }
+
+  for (int i = 0; i < map.rows; i++) {
+    for (int j = 0; j < map.cols; j++) {
+      if (map.map[i][j].bomb) {
+        for (int k = 0; k < 8; k++) {
+          int nr = i + offsets[k][0];
+          int nc = j + offsets[k][1];
+          if (nr >= 0 && nr < map.rows && nc >= 0 && nc < map.cols &&
+              map.map[nr][nc].near != 9) {
+            map.map[nr][nc].near += 1;
+          }
+        }
+      }
+    }
   }
 
   // Disable echo and canonical mode.
@@ -63,6 +99,9 @@ int main(void) {
   new_t = default_t;
   new_t.c_lflag &= ~(tcflag_t)(ECHO | ICANON);
   tcsetattr(STDIN_FILENO, TCSANOW, &new_t);
+
+  printf("\x1b[m");
+  fflush(stdout);
 
   // Main game loop.
   while (1) {
@@ -74,13 +113,47 @@ int main(void) {
     printf("\x1b[0;0H");
     for (int i = 0; i < map.rows; i++) {
       for (int j = 0; j < map.cols; j++) {
-        printf("%d", map.map[i][j] ? 1 : 0);
+        if (map.map[i][j].revealed) {
+          char *color = "";
+
+          switch (map.map[i][j].near) {
+          case 1:
+            color = "\x1b[38;5;21m";
+            break;
+          case 2:
+            color = "\x1b[38;5;2m";
+            break;
+          case 3:
+            color = "\x1b[38;5;9m";
+            break;
+          case 4:
+            color = "\x1b[38;5;4m";
+            break;
+          case 5:
+            color = "\x1b[38;5;1m";
+            break;
+          case 6:
+            color = "\x1b[38;5;14m";
+            break;
+          case 7:
+            color = "\x1b[38;5;0m";
+            break;
+          case 8:
+            color = "\x1b[38;5;8m";
+            break;
+          }
+
+          printf("%s%c\x1b[m", color,
+                 map.map[i][j].near ? map.map[i][j].near + '0' : ' ');
+        } else {
+          printf("#");
+        }
       }
       printf("\n");
     }
     printf("\n");
 
-    printf("%s\x1b[%d;%dH", cursor.color, cursor.y, cursor.x);
+    printf("\x1b[%d;%dH", cursor.y, cursor.x);
     fflush(stdout);
 
     memset(&input, '\0', sizeof(input));          // 'clear' the input buffer.
@@ -101,12 +174,19 @@ int main(void) {
         cursor.x--;
         break;
       }
-      if (strcpy(input, "\x1b")) {
+      if (strcmp(input, "\x1b") == 0) {
         goto exit;
       }
     } else {
       switch (input[0]) {
       case '\n':
+        if (map.map[cursor.y - 1][cursor.x - 1].bomb) {
+          printf("\x1b[2J!DEATH!");
+          fflush(stdout);
+          goto exit;
+        } else {
+          floodFill(cursor.x - 1, cursor.y - 1);
+        }
         break;
       }
     }
@@ -123,7 +203,6 @@ int main(void) {
   }
 
 exit:
-
   for (int i = 0; i < map.rows; i++) {
     free(map.map[i]);
   }
@@ -136,4 +215,21 @@ exit:
 static inline void winclear(void) {
   fprintf(stdout, "\x1b[2J");
   return;
+}
+
+void floodFill(int x, int y) {
+  if (map.map[y][x].near == 0 && map.map[y][x].revealed == false) {
+    map.map[y][x].revealed = true;
+    for (int i = 0; i < 8; i++) {
+      int ny = y + offsets[i][0];
+      int nx = x + offsets[i][1];
+      if (ny >= 0 && ny < map.rows && nx >= 0 && nx < map.cols &&
+          map.map[ny][nx].near != 9) {
+        floodFill(nx, ny);
+        map.map[ny][nx].revealed = true;
+      }
+    }
+  } else {
+    map.map[y][x].revealed = true;
+  }
 }
